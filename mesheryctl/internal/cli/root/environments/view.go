@@ -47,7 +47,7 @@ func formatEnvironmentLabel(rows []environment.Environment) []string {
 
 var viewEnvironmentCmd = &cobra.Command{
 	Use:   "view [environment-name|environment-id]",
-	Short: "View registered environmnents",
+	Short: "View registered environments",
 	Long: `View details of an environment registered in Meshery Server for a specific organization
 Find more information at: https://docs.meshery.io/reference/references/mesheryctl/environment/view`,
 	Example: `
@@ -69,7 +69,7 @@ mesheryctl environment view --orgId [orgId]
 	},
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if environmentViewFlagsProvided.orgId == "" {
-			const errMsg = "[ orgId ] isn't specified\n\nUsage: mesheryctl environment view --orgId [orgId]\nRun 'mesheryctl environment view --help' to see detailed help message"
+			const errMsg = "[ orgId ] isn't specified\n\nUsage: mesheryctl environment view [environment-name|environment-id] --orgId [orgId]\nRun 'mesheryctl environment view --help' to see detailed help message"
 			return utils.ErrInvalidArgument(errors.New(errMsg))
 		}
 
@@ -91,6 +91,10 @@ mesheryctl environment view --orgId [orgId]
 			fetchedEnvironment, err := api.Fetch[environment.Environment](urlPath)
 			if err != nil {
 				return err
+			}
+			// Not every provider scopes the lookup by orgId, so check it here.
+			if !strings.EqualFold(fetchedEnvironment.OrganizationID.String(), environmentViewFlagsProvided.orgId) {
+				return utils.ErrNotFound(fmt.Errorf("No environment found with ID %s in organization: %s", args[0], environmentViewFlagsProvided.orgId))
 			}
 			selectedEnvironment = *fetchedEnvironment
 		} else {

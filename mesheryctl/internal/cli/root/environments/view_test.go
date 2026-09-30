@@ -43,7 +43,7 @@ func TestViewEnvironment(t *testing.T) {
 			Fixture:          "view.environment.api.response.golden",
 			ExpectedResponse: "",
 			ExpectError:      true,
-			ExpectedError:    utils.ErrInvalidArgument(errors.New("[ orgId ] isn't specified\n\nUsage: mesheryctl environment view --orgId [orgId]\nRun 'mesheryctl environment view --help' to see detailed help message")),
+			ExpectedError:    utils.ErrInvalidArgument(errors.New("[ orgId ] isn't specified\n\nUsage: mesheryctl environment view [environment-name|environment-id] --orgId [orgId]\nRun 'mesheryctl environment view --help' to see detailed help message")),
 		},
 		{
 			Name:             "given invalid orgId when running environment view then return error",
@@ -65,6 +65,17 @@ func TestViewEnvironment(t *testing.T) {
 			Fixture:          "view.environment.api.response.golden",
 			ExpectedResponse: "view.environment.output.golden",
 			ExpectError:      false,
+		},
+		{
+			Name:             "given environment ID from another organization when running environment view then return not found error",
+			Args:             []string{"view", environmentID, "--orgId", orgID},
+			HttpMethod:       "GET",
+			HttpStatusCode:   200,
+			URL:              fmt.Sprintf("/%s/%s?orgId=%s", environmentApiPath, environmentID, orgID),
+			Fixture:          "view.environment.other.org.response.golden",
+			ExpectedResponse: "",
+			ExpectError:      true,
+			ExpectedError:    utils.ErrNotFound(fmt.Errorf("No environment found with ID %s in organization: %s", environmentID, orgID)),
 		},
 		{
 			Name:             "given environment name with a single match when running environment view then display environment",
