@@ -2,13 +2,18 @@ package environments
 
 import (
 	"fmt"
+	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"github.com/jarcoal/httpmock"
+	"github.com/manifoldco/promptui"
 	"github.com/meshery/meshery/mesheryctl/internal/cli/pkg/display"
 	"github.com/meshery/meshery/mesheryctl/pkg/utils"
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestViewEnvironment(t *testing.T) {
@@ -124,4 +129,71 @@ func TestViewEnvironment(t *testing.T) {
 	}
 
 	utils.InvokeMesheryctlTestCommand(t, update, EnvironmentCmd, tests, currDir, "environment")
+}
+
+func TestViewEnvironment_PaginationSecondPage(t *testing.T) {
+	orgID := testConstants["orgId"]
+
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("Not able to get current working directory")
+	}
+	currDir := filepath.Dir(filename)
+	fixturesDir := filepath.Join(currDir, "fixtures")
+	testdataDir := filepath.Join(currDir, "testdata")
+
+	originalTerminal := utils.IsInteractiveTerminal
+	utils.IsInteractiveTerminal = func() bool { return true }
+	t.Cleanup(func() { utils.IsInteractiveTerminal = originalTerminal })
+
+	testContext := utils.InitTestEnvironment(t)
+	utils.TokenFlag = utils.GetToken(t)
+	defer func() {
+		utils.TokenFlag = "Not Set"
+	}()
+
+	page0Resp := utils.NewGoldenFile(t, "view.environment.first.page.response.golden", fixturesDir).Load()
+	page1Resp := utils.NewGoldenFile(t, "view.environment.second.page.response.golden", fixturesDir).Load()
+	expectedOutput := utils.NewGoldenFile(t, "view.environment.second.page.output.golden", testdataDir).Load()
+
+	urlPage0 := testContext.BaseURL + fmt.Sprintf("/%s?orgId=%s&page=0&pagesize=10", environmentApiPath, orgID)
+	urlPage1 := testContext.BaseURL + fmt.Sprintf("/%s?orgId=%s&page=1&pagesize=10", environmentApiPath, orgID)
+
+	page1Requested := false
+	httpmock.RegisterResponder("GET", urlPage0, httpmock.NewStringResponder(200, page0Resp))
+	httpmock.RegisterResponder("GET", urlPage1, func(req *http.Request) (*http.Response, error) {
+		page1Requested = true
+		return httpmock.NewStringResponse(200, page1Resp), nil
+	})
+
+	promptCount := 0
+	origRunPrompt := display.RunSelectPrompt
+	display.RunSelectPrompt = func(p promptui.Select) (int, string, error) {
+		promptCount++
+		if promptCount == 1 {
+			// On page 0, select "Load More....." (last item, index 10)
+			return 10, "Load More.....", nil
+		}
+		// On page 1, select env-1 (index 0)
+		return 0, "env-1", nil
+	}
+	t.Cleanup(func() { display.RunSelectPrompt = origRunPrompt })
+
+	cmd := EnvironmentCmd
+	defer utils.ResetCommandFlags(cmd, t)
+
+	originalStdout := os.Stdout
+	b := utils.SetupMeshkitLoggerTesting(t, false)
+	defer func() {
+		os.Stdout = originalStdout
+	}()
+
+	cmd.SetArgs([]string{"view", "--orgId", orgID})
+	cmd.SetOut(b)
+
+	err := cmd.Execute()
+	assert.NoError(t, err)
+	assert.True(t, page1Requested, "expected page 1 to be requested from server")
+	assert.Equal(t, 2, promptCount, "expected 2 prompts to be presented (page 0 and page 1)")
+	utils.Equals(t, expectedOutput, b.String())
 }
